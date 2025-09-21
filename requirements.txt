@@ -8,3 +8,7 @@ thefuzz
 numpy
 supabase
 google-generativeai
+streamlit
+pandas
+plotly
+requests
