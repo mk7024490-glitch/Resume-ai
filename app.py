@@ -14,12 +14,13 @@ import numpy as np
 import google.generativeai as genai
 
 # --- Local Imports ---
+# Make sure you have a config.py file in the same directory
 from config import SUPABASE_URL, SUPABASE_KEY, GEMINI_API_KEY
 from supabase import create_client, Client
 
 # --- Application Setup ---
 app = Flask(__name__)
-CORS(app)
+CORS(app) # This is crucial for connecting backend and frontend
 
 # --- Client Initializations ---
 supabase: Client = None
@@ -47,10 +48,11 @@ def extract_text(file_content, file_extension):
     try:
         if file_extension == '.pdf':
             with fitz.open(stream=file_content, filetype="pdf") as doc:
-                text = "".join(page.get_text() for page in doc)
+                return "".join(page.get_text() for page in doc)
         elif file_extension == '.docx':
             doc = Document(io.BytesIO(file_content))
-            text = "\n".join(p.text for p in doc.paragraphs)
+            return "\n".join(p.text for p in doc.paragraphs)
+        return "Unsupported file type"
     except Exception as e:
         return f"Error extracting text: {e}"
     return text
@@ -60,17 +62,40 @@ def parse_with_llm(text, prompt_template):
     prompt = prompt_template.format(text=text)
     try:
         response = llm_model.generate_content(prompt)
+        # Clean the response to make it valid JSON
         json_response = response.text.strip().replace('`', '').replace('json', '')
         return json.loads(json_response)
     except Exception as e:
         print(f"LLM Parsing Error: {e}")
         return {"error": f"Failed to parse with LLM: {str(e)}"}
 
-# --- API Endpoints ---
+# ==============================================================================
+# API ENDPOINTS
+# ==============================================================================
+
 @app.route('/', methods=['GET'])
 def health_check():
+    """A simple endpoint to confirm the backend is running."""
     return jsonify({"status": "Backend is running and healthy"}), 200
 
+# --- NEW Endpoints to fetch all data for the dashboard ---
+@app.route('/jds', methods=['GET'])
+def get_all_jds():
+    try:
+        response = supabase.table('job_descriptions').select('id, file_name, job_title').execute()
+        return jsonify(response.data), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/resumes', methods=['GET'])
+def get_all_resumes():
+    try:
+        response = supabase.table('resumes').select('id, file_name').execute()
+        return jsonify(response.data), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# --- File Upload Endpoints ---
 @app.route('/analyze-resume', methods=['POST'])
 def analyze_resume_endpoint():
     if 'file' not in request.files: return jsonify({'error': 'No file part'}), 400
@@ -120,6 +145,7 @@ def analyze_jd_endpoint():
         return jsonify({"message": "JD analyzed with LLM.", "jd_id": new_id, "parsed_details": parsed_details}), 200
     except Exception as e: return jsonify({"error": f"Supabase error: {str(e)}"}), 500
 
+# --- Matching Endpoints ---
 def perform_advanced_match(resume_data, jd_data):
     resume_text = resume_data.get('raw_text', '')
     jd_text = jd_data.get('raw_text', '')
@@ -174,5 +200,6 @@ def advanced_match_endpoint(resume_id, jd_id):
         }), 200
     except Exception as e: return jsonify({"error": f"An error occurred: {str(e)}"}), 500
 
+# --- Main Execution ---
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
